@@ -12,12 +12,7 @@ bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 db = sqlite3.connect("players.db", check_same_thread=False)
 cur = db.cursor()
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS leaders(
-    user_id INTEGER PRIMARY KEY
-)
-""")
-
+cur.execute("CREATE TABLE IF NOT EXISTS leaders(user_id INTEGER PRIMARY KEY)")
 cur.execute("""
 CREATE TABLE IF NOT EXISTS players(
     user_id INTEGER PRIMARY KEY,
@@ -27,16 +22,14 @@ CREATE TABLE IF NOT EXISTS players(
     status TEXT DEFAULT 'pending'
 )
 """)
-
 cur.execute("INSERT OR IGNORE INTO leaders(user_id) VALUES(?)", (OWNER_ID,))
 db.commit()
 
 steps = {}
 cache = {}
 
-# ================= HELPERS =================
 def is_leader(uid):
-    return cur.execute(
+    return uid == OWNER_ID or cur.execute(
         "SELECT 1 FROM leaders WHERE user_id=?",
         (uid,)
     ).fetchone() is not None
@@ -46,7 +39,7 @@ def subscribed(uid):
         return True
     try:
         member = bot.get_chat_member(CHANNEL, uid)
-        return member.status in ["member", "administrator", "creator"]
+        return member.status not in ["left", "kicked"]
     except:
         return False
 
@@ -69,7 +62,6 @@ def send_home(uid):
     else:
         bot.send_message(uid, "أهلاً بك", reply_markup=user_menu())
 
-# ================= START =================
 @bot.message_handler(commands=["start"])
 def start(msg):
     uid = msg.chat.id
@@ -78,36 +70,26 @@ def start(msg):
 
     if not subscribed(uid):
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton(
-            "اشترك بالقناة",
-            url="https://t.me/mu_un1"
-        ))
-        bot.send_message(
-            uid,
-            "يجب الاشتراك بالقناة ثم أرسل /start",
-            reply_markup=kb
-        )
+        kb.add(types.InlineKeyboardButton("اشترك بالقناة", url="https://t.me/mu_un1"))
+        kb.add(types.InlineKeyboardButton("✅ تحقق من الاشتراك", callback_data="check_sub"))
+        bot.send_message(uid, "يجب الاشتراك بالقناة أولاً", reply_markup=kb)
         return
 
     send_home(uid)
 
-# ================= ID =================
 @bot.message_handler(commands=["id"])
 def myid(msg):
     bot.send_message(msg.chat.id, f"ID: {msg.chat.id}")
 
-# ================= BUTTONS =================
 @bot.message_handler(func=lambda m: m.text == "📝 تسجيل")
 def register(m):
     uid = m.chat.id
+
     if not subscribed(uid):
         start(m)
         return
 
-    if cur.execute(
-        "SELECT 1 FROM players WHERE user_id=?",
-        (uid,)
-    ).fetchone():
+    if cur.execute("SELECT 1 FROM players WHERE user_id=?", (uid,)).fetchone():
         bot.send_message(uid, "أنت مسجل مسبقاً")
         return
 
@@ -116,27 +98,17 @@ def register(m):
 
 @bot.message_handler(func=lambda m: m.text == "📊 عدد اللاعبين")
 def count_users(m):
-    n = cur.execute(
-        "SELECT COUNT(*) FROM players WHERE status='accepted'"
-    ).fetchone()[0]
-
+    n = cur.execute("SELECT COUNT(*) FROM players WHERE status='accepted'").fetchone()[0]
     bot.send_message(m.chat.id, f"عدد اللاعبين: {n}")
 
 @bot.message_handler(func=lambda m: m.text == "ℹ️ معلومات")
 def info(m):
-    bot.send_message(
-        m.chat.id,
-        "بوت تسجيل لاعبين الاتحاد العراقي"
-    )
+    bot.send_message(m.chat.id, "بوت تسجيل لاعبين الاتحاد العراقي")
 
 @bot.message_handler(func=lambda m: m.text == "📞 تواصل")
 def contact(m):
-    bot.send_message(
-        m.chat.id,
-        "للتواصل مع الإدارة: @username"
-    )
+    bot.send_message(m.chat.id, "للتواصل: @username")
 
-# ================= ADMIN =================
 @bot.message_handler(func=lambda m: m.text == "📥 الطلبات")
 def requests_btn(m):
     if not is_leader(m.chat.id):
@@ -155,14 +127,8 @@ def requests_btn(m):
     for uid, name, link, serial in rows:
         kb = types.InlineKeyboardMarkup()
         kb.row(
-            types.InlineKeyboardButton(
-                "✅ قبول",
-                callback_data=f"acc:{uid}"
-            ),
-            types.InlineKeyboardButton(
-                "❌ رفض",
-                callback_data=f"rej:{uid}"
-            )
+            types.InlineKeyboardButton("✅ قبول", callback_data=f"acc:{uid}"),
+            types.InlineKeyboardButton("❌ رفض", callback_data=f"rej:{uid}")
         )
 
         bot.send_message(
@@ -173,67 +139,58 @@ def requests_btn(m):
 
 @bot.message_handler(func=lambda m: m.text == "🔍 بحث لاعب")
 def search_btn(m):
-    if not is_leader(m.chat.id):
-        return
-
-    steps[m.chat.id] = "search"
-    bot.send_message(m.chat.id, "ارسل اسم اللاعب أو رابطه")
+    if is_leader(m.chat.id):
+        steps[m.chat.id] = "search"
+        bot.send_message(m.chat.id, "ارسل اسم اللاعب أو رابطه")
 
 @bot.message_handler(func=lambda m: m.text == "📢 إعلان")
 def ad_btn(m):
-    if not is_leader(m.chat.id):
-        return
-
-    steps[m.chat.id] = "broadcast"
-    bot.send_message(
-        m.chat.id,
-        "ارسل نص الإعلان أو صورة مع تعليق"
-    )
+    if is_leader(m.chat.id):
+        steps[m.chat.id] = "broadcast"
+        bot.send_message(m.chat.id, "ارسل نص الإعلان أو صورة مع تعليق")
 
 @bot.message_handler(func=lambda m: m.text == "➕ إضافة قائد")
 def add_leader_btn(m):
-    if not is_leader(m.chat.id):
-        return
-
-    steps[m.chat.id] = "addleader"
-    bot.send_message(m.chat.id, "ارسل ID القائد")
+    if is_leader(m.chat.id):
+        steps[m.chat.id] = "addleader"
+        bot.send_message(m.chat.id, "ارسل ID القائد")
 
 @bot.message_handler(func=lambda m: m.text == "➖ حذف قائد")
 def del_leader_btn(m):
-    if not is_leader(m.chat.id):
-        return
+    if is_leader(m.chat.id):
+        steps[m.chat.id] = "delleader"
+        bot.send_message(m.chat.id, "ارسل ID القائد للحذف")
 
-    steps[m.chat.id] = "delleader"
-    bot.send_message(m.chat.id, "ارسل ID القائد للحذف")
-
-# ================= CALLBACK =================
 @bot.callback_query_handler(func=lambda c: True)
 def callback(c):
-    if not is_leader(c.message.chat.id):
+    uid = c.message.chat.id
+
+    if c.data == "check_sub":
+        if subscribed(uid):
+            bot.answer_callback_query(c.id, "تم التحقق ✅")
+            send_home(uid)
+        else:
+            bot.answer_callback_query(c.id, "بعدك غير مشترك ❌")
         return
 
-    action, uid = c.data.split(":")
-    uid = int(uid)
+    if not is_leader(uid):
+        return
+
+    action, target = c.data.split(":")
+    target = int(target)
 
     if action == "acc":
-        cur.execute(
-            "UPDATE players SET status='accepted' WHERE user_id=?",
-            (uid,)
-        )
+        cur.execute("UPDATE players SET status='accepted' WHERE user_id=?", (target,))
         db.commit()
-        bot.send_message(uid, "تم قبول طلبك ✅")
+        bot.send_message(target, "تم قبول طلبك ✅")
 
     elif action == "rej":
-        cur.execute(
-            "DELETE FROM players WHERE user_id=?",
-            (uid,)
-        )
+        cur.execute("DELETE FROM players WHERE user_id=?", (target,))
         db.commit()
-        bot.send_message(uid, "تم رفض طلبك ❌")
+        bot.send_message(target, "تم رفض طلبك ❌")
 
     bot.answer_callback_query(c.id, "تم")
 
-# ================= ALL MESSAGES =================
 @bot.message_handler(content_types=["text", "photo"])
 def all_messages(m):
     uid = m.chat.id
@@ -245,7 +202,6 @@ def all_messages(m):
     if m.content_type == "text":
         txt = m.text.strip()
 
-        # تسجيل
         if step == "name":
             cache[uid] = {"name": txt}
             steps[uid] = "link"
@@ -257,12 +213,7 @@ def all_messages(m):
                 bot.send_message(uid, "الرابط غير صحيح")
                 return
 
-            old = cur.execute(
-                "SELECT 1 FROM players WHERE link=?",
-                (txt,)
-            ).fetchone()
-
-            if old:
+            if cur.execute("SELECT 1 FROM players WHERE link=?", (txt,)).fetchone():
                 bot.send_message(uid, "الرابط مستخدم")
                 return
 
@@ -272,44 +223,25 @@ def all_messages(m):
             return
 
         if step == "serial":
-            old = cur.execute(
-                "SELECT 1 FROM players WHERE serial=?",
-                (txt,)
-            ).fetchone()
-
-            if old:
+            if cur.execute("SELECT 1 FROM players WHERE serial=?", (txt,)).fetchone():
                 bot.send_message(uid, "الرقم مستخدم")
                 return
 
-            cur.execute("""
-                INSERT INTO players(
-                    user_id,name,link,serial,status
-                ) VALUES(?,?,?,?,?)
-            """, (
-                uid,
-                cache[uid]["name"],
-                cache[uid]["link"],
-                txt,
-                "pending"
-            ))
-            db.commit()
-
-            steps.pop(uid, None)
-            cache.pop(uid, None)
-
-            bot.send_message(uid, "تم إرسال طلبك للمراجعة")
+            cache[uid]["serial"] = txt
+            steps[uid] = "screen"
+            bot.send_message(uid, "📸 ارسل سكرين للرقم التسلسلي")
             return
 
-        # بحث
+        if step == "screen":
+            bot.send_message(uid, "❌ ارسل صورة فقط")
+            return
+
         if step == "search":
             rows = cur.execute("""
                 SELECT user_id,name,link,serial,status
                 FROM players
                 WHERE name LIKE ? OR link LIKE ?
-            """, (
-                f"%{txt}%",
-                f"%{txt}%"
-            )).fetchall()
+            """, (f"%{txt}%", f"%{txt}%")).fetchall()
 
             steps.pop(uid, None)
 
@@ -324,14 +256,10 @@ def all_messages(m):
                 )
             return
 
-        # إعلان نص
         if step == "broadcast":
-            users = cur.execute("""
-                SELECT user_id FROM players
-                WHERE status='accepted'
-            """).fetchall()
-
+            users = cur.execute("SELECT user_id FROM players WHERE status='accepted'").fetchall()
             sent = 0
+
             for u in users:
                 try:
                     bot.send_message(u[0], txt)
@@ -343,18 +271,13 @@ def all_messages(m):
             bot.send_message(uid, f"تم الإرسال إلى {sent} لاعب")
             return
 
-        # إضافة قائد
         if step == "addleader" and txt.isdigit():
-            cur.execute(
-                "INSERT OR IGNORE INTO leaders VALUES(?)",
-                (int(txt),)
-            )
+            cur.execute("INSERT OR IGNORE INTO leaders VALUES(?)", (int(txt),))
             db.commit()
             steps.pop(uid, None)
             bot.send_message(uid, "تمت الإضافة")
             return
 
-        # حذف قائد
         if step == "delleader" and txt.isdigit():
             cur.execute(
                 "DELETE FROM leaders WHERE user_id=? AND user_id!=?",
@@ -365,31 +288,42 @@ def all_messages(m):
             bot.send_message(uid, "تم الحذف")
             return
 
-    # إعلان صورة
-    if m.content_type == "photo" and step == "broadcast":
-        users = cur.execute("""
-            SELECT user_id FROM players
-            WHERE status='accepted'
-        """).fetchall()
+    if m.content_type == "photo":
 
-        sent = 0
-        caption = m.caption if m.caption else ""
+        if step == "screen":
+            cur.execute("""
+                INSERT INTO players(user_id,name,link,serial,status)
+                VALUES(?,?,?,?,?)
+            """, (
+                uid,
+                cache[uid]["name"],
+                cache[uid]["link"],
+                cache[uid]["serial"],
+                "pending"
+            ))
+            db.commit()
 
-        for u in users:
-            try:
-                bot.send_photo(
-                    u[0],
-                    m.photo[-1].file_id,
-                    caption=caption
-                )
-                sent += 1
-            except:
-                pass
+            steps.pop(uid, None)
+            cache.pop(uid, None)
 
-        steps.pop(uid, None)
-        bot.send_message(uid, f"تم إرسال الصورة إلى {sent} لاعب")
+            bot.send_message(uid, "تم إرسال طلبك للمراجعة")
+            return
 
-# ================= RUN =================
+        if step == "broadcast":
+            users = cur.execute("SELECT user_id FROM players WHERE status='accepted'").fetchall()
+            sent = 0
+            caption = m.caption if m.caption else ""
+
+            for u in users:
+                try:
+                    bot.send_photo(u[0], m.photo[-1].file_id, caption=caption)
+                    sent += 1
+                except:
+                    pass
+
+            steps.pop(uid, None)
+            bot.send_message(uid, f"تم إرسال الصورة إلى {sent} لاعب")
+
 while True:
     try:
         bot.infinity_polling(skip_pending=True)
